@@ -181,7 +181,7 @@ pub async fn handshake(
     })
 }
 
-async fn expect_hash(io: &mut SessionIo, peer: &str) -> Result<crate::proto::Hash> {
+async fn expect_hash(io: &mut SessionIo, _peer: &str) -> Result<crate::proto::Hash> {
     loop {
         let msg = io.recv_msg().await.context("waiting for Hash")?;
         match msg.union {

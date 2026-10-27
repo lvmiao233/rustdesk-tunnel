@@ -5,9 +5,25 @@ use std::net::SocketAddr;
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub rustdesk: Rustdesk,
-    pub service: Service,
-    pub local: Local,
     pub campus: Campus,
+    /// device-side target of the RustDesk port forward — normally the
+    /// device's own sshd, since the SSH layer inside is the data encryption
+    #[serde(default = "default_service")]
+    pub service: Service,
+    /// legacy single-listener mode (plain tunnel, no SSH layer)
+    #[serde(default)]
+    pub local: Option<Local>,
+    #[serde(default)]
+    pub ssh: Option<Ssh>,
+    /// local forwards served over the in-tunnel SSH session
+    #[serde(default, rename = "forward")]
+    pub forwards: Vec<ForwardRule>,
+}
+
+fn default_service() -> Service {
+    Service {
+        remote_addr: "127.0.0.1:22".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -24,7 +40,7 @@ pub struct Rustdesk {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Service {
-    /// remote service address as seen from the device (usually 127.0.0.1:port)
+    /// address as seen from the device; the SSH layer requires the sshd
     pub remote_addr: String,
 }
 
@@ -32,6 +48,24 @@ pub struct Service {
 pub struct Local {
     /// local listen address, what your programs connect to off campus
     pub listen: SocketAddr,
+}
+
+/// SSH login for the in-tunnel SSH session (the end-to-end data encryption).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Ssh {
+    pub user: String,
+    /// either password or key_file must be set
+    pub password: Option<String>,
+    pub key_file: Option<String>,
+}
+
+/// One forwarded port: `local` listens here, traffic exits from the device
+/// to `remote_host:remote_port`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ForwardRule {
+    pub local: SocketAddr,
+    pub remote_host: String,
+    pub remote_port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,5 +95,20 @@ impl Config {
             .rsplit_once(':')
             .context("remote_addr must be host:port")?;
         Ok((h.to_string(), p.parse().context("remote port")?))
+    }
+
+    /// State dir for runtime files (pinned host key, logs). XDG-ish.
+    pub fn state_dir() -> std::path::PathBuf {
+        let base = std::env::var_os("XDG_STATE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| {
+                    let mut p = std::path::PathBuf::from(h);
+                    p.push(".local/state");
+                    p
+                })
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        base.join("rdt")
     }
 }

@@ -15,7 +15,15 @@ sha2 = "0.10"
 hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 sodiumoxide = "0.2"
+russh = "=0.53.0"
 
 [[bin]]
 name = "rdt"
 path = "src/main.rs"
+
+[workspace]
+members = [".", "gui/src-tauri"]
+
+[profile.release]
+lto = true
+strip = true

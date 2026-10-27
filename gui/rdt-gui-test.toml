@@ -1,0 +1,22 @@
+[rustdesk]
+server = "118.178.88.35:21116"
+key = "kdeD4DHik3lsXtP1vA689yovVOgYjHqmys+ZlwM4qHM="
+device_id = "382976955"
+password = "Vipa@404"
+
+[service]
+remote_addr = "127.0.0.1:22"
+
+[campus]
+probe_url = "http://ping.vipa.dev/"
+probe_expect = "<html"
+probe_timeout_ms = 2000
+
+[ssh]
+user = "jsa"
+password = "vipa_404"
+
+[[forward]]
+local = "127.0.0.1:49827"
+remote_host = "127.0.0.1"
+remote_port = 18080
