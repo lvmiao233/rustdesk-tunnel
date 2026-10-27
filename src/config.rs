@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::net::SocketAddr;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub rustdesk: Rustdesk,
     pub service: Service,
@@ -10,7 +10,7 @@ pub struct Config {
     pub campus: Campus,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Rustdesk {
     /// hbbs address, host:port (default port 21116)
     pub server: String,
@@ -22,19 +22,19 @@ pub struct Rustdesk {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Service {
     /// remote service address as seen from the device (usually 127.0.0.1:port)
     pub remote_addr: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Local {
     /// local listen address, what your programs connect to off campus
     pub listen: SocketAddr,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Campus {
     /// plain-HTTP URL that only answers on campus
     pub probe_url: String,

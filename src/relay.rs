@@ -1,93 +1,83 @@
-use crate::mangle;
+//! Relay path: ask hbbs to have the peer meet us on hbbr, then dial hbbr.
+//!
+//! Flow (all rendezvous messages length-prefixed, see crate::frame):
+//! 1. TCP to hbbs, framed RequestRelay{id, uuid, relay_server, licence_key}
+//!    — hbbs forwards it to the peer over UDP; nothing comes back to us, so
+//!    we can drop the hbbs connection right away.
+//! 2. TCP to hbbr, framed RequestRelay{uuid, licence_key}. hbbr parks the
+//!    first side and pairs when the second arrives (both must arrive within
+//!    ~30s), then flips both sides to raw mode — a plain byte pipe.
+//! 3. The RustDesk session handshake (Hash / LoginRequest / TestDelay) runs
+//!    inside that pipe between us and the peer, also framed.
+
+use crate::frame::{send_frame};
 use crate::proto::rendezvous_message::Union as RzUnion;
 use crate::proto::*;
-use anyhow::{bail, Result};
+use anyhow::{Context, Result};
 use prost::Message as _;
-
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
-/// Ask hbbs to have the peer meet us at the relay server, then dial the relay.
-/// Returns the raw TCP stream to hbbr with the UUID handshake done on both
-/// sides (the peer connects independently; hbbr pairs by UUID).
-pub async fn request_relay(
+/// Resolve `host[:port]` against the hbbr default port 21117.
+fn resolve_relay(server: &str) -> anyhow::Result<std::net::SocketAddr> {
+    let with_port = if server.contains(':') {
+        server.to_string()
+    } else {
+        format!("{server}:21117")
+    };
+    if let Ok(a) = with_port.parse() {
+        return Ok(a);
+    }
+    use std::net::ToSocketAddrs;
+    let mut addrs = with_port.to_socket_addrs().context("resolve relay")?;
+    addrs.next().context("no address for relay")
+}
+
+pub async fn open(
     server: &str,
     device_id: &str,
+    licence_key: &str,
     relay_server: &str,
-    timeout: Duration,
+    _timeout: Duration,
 ) -> Result<TcpStream> {
     let uuid = Uuid::new_v4().to_string();
 
-    // Phase 1: tell hbbs to relay — peer will dial hbbr with this uuid
-    let addr = crate::rendezvous::resolve_server(server)?;
-    let mut s = TcpStream::connect(addr).await?;
+    // 1. tell hbbs; the peer dials hbbr on its own once notified
+    let hbbs_addr = crate::rendezvous::resolve_server(server)?;
+    let mut s = TcpStream::connect(hbbs_addr).await?;
+    s.set_nodelay(true).ok();
     let req = RendezvousMessage {
         union: Some(RzUnion::RequestRelay(RequestRelay {
             id: device_id.to_owned(),
             uuid: uuid.clone(),
             relay_server: relay_server.to_owned(),
+            licence_key: licence_key.to_owned(),
             ..Default::default()
         })),
     };
-    // Relay requests go as a single protobuf frame (no prefix needed —
-    // only PunchHoleRequest uses the TCP fallback prefix)
-    s.write_all(&req.encode_to_vec()).await?;
+    send_frame(&mut s, &req.encode_to_vec())
+        .await
+        .context("send RequestRelay to hbbs")?;
+    drop(s);
 
-    // Wait for RelayResponse confirming the peer has been notified
-    let mut buf = Vec::with_capacity(1024);
-    let mut chunk = [0u8; 2048];
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        let remain = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remain.is_zero() {
-            bail!("timeout waiting for relay response");
-        }
-        let n = tokio::time::timeout(remain, s.read(&mut chunk)).await??;
-        if n == 0 {
-            bail!("hbbs closed the connection");
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        for data in [buf.as_slice(), buf.get(2..).unwrap_or(&[])] {
-            if data.is_empty() {
-                continue;
-            }
-            if let Ok(msg) = RendezvousMessage::decode(data) {
-                if let Some(RzUnion::RelayResponse(rr)) = msg.union {
-                    if !rr.refuse_reason.is_empty() {
-                        bail!("relay refused: {}", rr.refuse_reason);
-                    }
-                    // Phase 2: dial hbbr with the uuid
-                    let relay_addr = if rr.relay_server.is_empty() {
-                        crate::rendezvous::resolve_server(relay_server)?
-                    } else {
-                        crate::rendezvous::resolve_server(&rr.relay_server)?
-                    };
-                    drop(s); // release the hbbs connection
-                    return dial_relay(relay_addr, &uuid, timeout).await;
-                }
-            }
-        }
-    }
-}
-
-/// Connect to hbbr and announce our UUID so it can pair us with the peer.
-async fn dial_relay(
-    relay_addr: std::net::SocketAddr,
-    uuid: &str,
-    timeout: Duration,
-) -> Result<TcpStream> {
-    let mut s = TcpStream::connect(relay_addr).await?;
-    let req = RendezvousMessage {
+    // 2. dial hbbr and announce the same uuid — hbbr pairs the two sides and
+    //    turns the connection into a raw pipe
+    let hbbr_addr = resolve_relay(relay_server)?;
+    let mut r = TcpStream::connect(hbbr_addr).await?;
+    r.set_nodelay(true).ok();
+    let announce = RendezvousMessage {
         union: Some(RzUnion::RequestRelay(RequestRelay {
-            uuid: uuid.to_owned(),
+            uuid: uuid.clone(),
+            licence_key: licence_key.to_owned(),
             ..Default::default()
         })),
     };
-    s.write_all(&req.encode_to_vec()).await?;
-    // hbbr doesn't respond — it just starts relaying once both sides arrive.
-    // The stream from here on is a raw byte pipe to the peer.
-    let _ = timeout;
-    Ok(s)
+    send_frame(&mut r, &announce.encode_to_vec())
+        .await
+        .context("send RequestRelay to hbbr")?;
+    if std::env::var("RDT_DEBUG").is_ok() {
+        eprintln!("relay {uuid}: announced on {hbbr_addr}");
+    }
+    Ok(r)
 }

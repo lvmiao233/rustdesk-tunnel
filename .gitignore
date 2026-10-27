@@ -3,3 +3,5 @@
 /node_modules
 *.log
 rdt.toml
+rdt-local.toml
+rdt-relaytest.toml

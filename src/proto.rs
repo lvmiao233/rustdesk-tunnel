@@ -197,8 +197,18 @@ pub struct PortForward {
     pub host: String,
     #[prost(int32, tag = "2")]
     pub port: i32,
-    #[prost(bool, tag = "3")]
-    pub multiplex: bool,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct TestDelay {
+    #[prost(int64, tag = "1")]
+    pub time: i64,
+    #[prost(bool, tag = "2")]
+    pub from_client: bool,
+    #[prost(uint32, tag = "3")]
+    pub last_delay: u32,
+    #[prost(uint32, tag = "4")]
+    pub target_bitrate: u32,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -272,76 +282,6 @@ pub mod login_response {
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
-pub struct PortForwardOpen {
-    #[prost(int32, tag = "1")]
-    pub channel_id: i32,
-    #[prost(string, tag = "2")]
-    pub host: String,
-    #[prost(int32, tag = "3")]
-    pub port: i32,
-    #[prost(uint32, tag = "4")]
-    pub window: u32,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct PortForwardOpened {
-    #[prost(int32, tag = "1")]
-    pub channel_id: i32,
-    #[prost(bool, tag = "2")]
-    pub success: bool,
-    #[prost(string, tag = "3")]
-    pub message: String,
-    #[prost(uint32, tag = "4")]
-    pub window: u32,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct PortForwardData {
-    #[prost(int32, tag = "1")]
-    pub channel_id: i32,
-    #[prost(bytes, tag = "2")]
-    pub data: Vec<u8>,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct PortForwardClose {
-    #[prost(int32, tag = "1")]
-    pub channel_id: i32,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct PortForwardWindowUpdate {
-    #[prost(int32, tag = "1")]
-    pub channel_id: i32,
-    #[prost(uint32, tag = "2")]
-    pub add: u32,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct PortForwardChannel {
-    #[prost(oneof = "port_forward_channel::Union", tags = "1, 2, 3, 4, 5")]
-    pub union: Option<port_forward_channel::Union>,
-}
-
-pub mod port_forward_channel {
-    use super::*;
-
-    #[derive(Clone, PartialEq, prost::Oneof)]
-    pub enum Union {
-        #[prost(message, tag = "1")]
-        Open(PortForwardOpen),
-        #[prost(message, tag = "2")]
-        Opened(PortForwardOpened),
-        #[prost(message, tag = "3")]
-        Data(PortForwardData),
-        #[prost(message, tag = "4")]
-        Close(PortForwardClose),
-        #[prost(message, tag = "5")]
-        WindowUpdate(PortForwardWindowUpdate),
-    }
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
 pub struct Misc {
     #[prost(string, tag = "9")]
     pub close_reason: String,
@@ -349,7 +289,7 @@ pub struct Misc {
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Message {
-    #[prost(oneof = "message::Union", tags = "3, 4, 7, 8, 9, 19, 33")]
+    #[prost(oneof = "message::Union", tags = "3, 4, 5, 7, 8, 9, 19")]
     pub union: Option<message::Union>,
 }
 
@@ -362,6 +302,8 @@ pub mod message {
         SignedId(SignedId),
         #[prost(message, tag = "4")]
         PublicKey(PublicKey),
+        #[prost(message, tag = "5")]
+        TestDelay(TestDelay),
         #[prost(message, tag = "7")]
         LoginRequest(LoginRequest),
         #[prost(message, tag = "8")]
@@ -370,7 +312,5 @@ pub mod message {
         Hash(Hash),
         #[prost(message, tag = "19")]
         Misc(Misc),
-        #[prost(message, tag = "33")]
-        PortForwardChannel(PortForwardChannel),
     }
 }
