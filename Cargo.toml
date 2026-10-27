@@ -15,7 +15,7 @@ sha2 = "0.10"
 hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 sodiumoxide = "0.2"
-russh = "=0.53.0"
+russh = { version = "=0.53.0", default-features = false, features = ["ring", "flate2"] }
 
 [[bin]]
 name = "rdt"
