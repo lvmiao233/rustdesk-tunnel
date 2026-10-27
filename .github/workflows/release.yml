@@ -182,10 +182,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mapfile -t files < <(find target -type f \
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find target -type f \
             \( -name '*.deb' -o -name '*.AppImage' -o -name '*.msi' \
                -o -name '*-setup.exe' -o -name '*.dmg' \) \
-            ! -name '*.sig')
+            ! -name '*.sig' -print0)
           if [ ${#files[@]} -eq 0 ]; then
             echo "no bundles found" >&2; exit 1
           fi
