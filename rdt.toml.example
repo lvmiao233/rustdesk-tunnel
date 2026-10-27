@@ -1,0 +1,16 @@
+[rustdesk]
+server = "hbbs.example.com:21116"
+key = "<id_ed25519.pub contents>"
+device_id = "123456789"
+password = "<permanent password>"
+
+[service]
+remote_addr = "127.0.0.1:<remote service port>"
+
+[local]
+listen = "127.0.0.1:49825"
+
+[campus]
+probe_url = "http://ping.example.com/"
+probe_expect = "<html"
+probe_timeout_ms = 2000
