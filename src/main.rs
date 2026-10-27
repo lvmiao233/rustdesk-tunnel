@@ -3,6 +3,7 @@ mod mangle;
 mod probe;
 mod proto;
 mod rendezvous;
+mod relay;
 
 use anyhow::Result;
 use std::time::Duration;
@@ -52,6 +53,8 @@ async fn run(cmd: &str, cfg: &config::Config) -> i32 {
     match cmd {
         "probe" => probe_cmd(cfg).await,
         "punch" => punch_cmd(cfg).await,
+        "relay" => relay_cmd(cfg).await,
+            "relay" => relay_cmd(cfg).await,
         other => {
             eprintln!("unknown command: {other}\n{USAGE}");
             2
@@ -68,6 +71,48 @@ async fn probe_cmd(cfg: &config::Config) -> i32 {
     .await;
     println!("campus={on_campus}");
     0
+}
+
+async fn relay_cmd(cfg: &config::Config) -> i32 {
+    // First punch to get relay server info
+    let punch = match rendezvous::punch(
+        &cfg.rustdesk.server,
+        &cfg.rustdesk.device_id,
+        &cfg.rustdesk.key,
+        Duration::from_secs(10),
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("punch for relay info failed: {e:#}");
+            return 1;
+        }
+    };
+    let relay_server = if punch.relay_server.is_empty() {
+        cfg.rustdesk.server.clone()
+    } else {
+        punch.relay_server.clone()
+    };
+    println!("requesting relay via {relay_server}...");
+    match relay::request_relay(
+        &cfg.rustdesk.server,
+        &cfg.rustdesk.device_id,
+        &relay_server,
+        Duration::from_secs(15),
+    )
+    .await
+    {
+        Ok(stream) => {
+            let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
+            println!("relay established: connected to {peer}");
+            0
+        }
+        Err(e) => {
+            eprintln!("relay failed: {e:#}");
+            1
+        }
+    }
 }
 
 async fn punch_cmd(cfg: &config::Config) -> i32 {
