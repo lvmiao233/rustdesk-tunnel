@@ -44,7 +44,9 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
     }
   };
 
-  const field = "w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm font-mono focus:border-emerald-500/50 focus:outline-none";
+  const base = "bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-sm font-mono focus:border-emerald-500/50 focus:outline-none";
+  const field = `${base} w-full`;
+
   const label = "block text-xs text-neutral-400 mb-1";
 
   return (
@@ -104,14 +106,14 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
         <div className="space-y-2">
           {forwards.map((f, i) => (
             <div key={i} className="flex gap-2 items-center">
-              <input className={`${field} flex-1 min-w-0`} value={f.local} placeholder="本地监听"
+              <input className={`${base} w-[38%] min-w-0`} value={f.local} placeholder="本地监听"
                 onChange={(e) => setForwards(forwards.map((x, j) => j === i ? { ...x, local: e.target.value } : x))} />
-              <span className="text-neutral-600 text-sm">→</span>
-              <input className={`${field} flex-1 min-w-0`} value={f.remote_host} placeholder="校内主机"
+              <span className="text-neutral-600 text-sm shrink-0">→</span>
+              <input className={`${base} flex-1 min-w-0`} value={f.remote_host} placeholder="校内主机"
                 onChange={(e) => setForwards(forwards.map((x, j) => j === i ? { ...x, remote_host: e.target.value } : x))} />
-              <input className={`${field} w-20 shrink-0`} value={f.remote_port} placeholder="端口"
+              <input className={`${base} w-16 shrink-0`} value={f.remote_port} placeholder="端口"
                 onChange={(e) => setForwards(forwards.map((x, j) => j === i ? { ...x, remote_port: Number(e.target.value) || 0 } : x))} />
-              <button className="text-red-400/70 hover:text-red-400 px-2"
+              <button className="text-red-400/70 hover:text-red-400 px-1 shrink-0"
                 onClick={() => setForwards(forwards.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
