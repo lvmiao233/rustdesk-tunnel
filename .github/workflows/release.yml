@@ -144,7 +144,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: gui
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name }}
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: 'RustDesk Tunnel ${{ github.ref_name }}'
           releaseDraft: true
           prerelease: false
