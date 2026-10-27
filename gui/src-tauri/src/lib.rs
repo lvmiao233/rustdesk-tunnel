@@ -103,7 +103,9 @@ fn start_inner(app: &tauri::AppHandle, state: &Core, force: bool) -> Result<(), 
 }
 
 #[tauri::command]
-fn start(app: tauri::AppHandle, state: tauri::State<'_, Core>, force: bool) -> Result<(), String> {
+async fn start(app: tauri::AppHandle, state: tauri::State<'_, Core>, force: bool) -> Result<(), String> {
+    // async command: runs on the tauri async runtime so tokio::spawn inside
+    // app::spawn has a reactor
     start_inner(&app, &state, force)
 }
 
@@ -146,6 +148,51 @@ fn save_config(app: tauri::AppHandle, cfg: serde_json::Value) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn export_config(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app
+        .dialog()
+        .file()
+        .add_filter("TOML", &["toml"])
+        .set_file_name("rdt.toml")
+        .blocking_save_file();
+    let Some(path) = path else {
+        return Ok("".into()); // cancelled
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    let content = std::fs::read_to_string(cfg_file(&app)).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
+}
+
+#[tauri::command]
+async fn import_config(app: tauri::AppHandle, state: tauri::State<'_, Core>) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app
+        .dialog()
+        .file()
+        .add_filter("TOML", &["toml"])
+        .blocking_pick_file();
+    let Some(path) = path else {
+        return Ok("".into()); // cancelled
+    };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取失败: {e}"))?;
+    // validate before applying
+    let parsed: toml::Value = content.parse().map_err(|e| format!("不是有效的 TOML: {e}"))?;
+    let json_val = serde_json::to_value(&parsed).map_err(|e| e.to_string())?;
+    let _: rustdesk_tunnel::config::Config =
+        serde_json::from_value(json_val).map_err(|e| format!("配置字段有误: {e}"))?;
+    std::fs::write(cfg_file(&app), &content).map_err(|e| e.to_string())?;
+    // restart the core if it was running so the new config takes effect
+    let running = state.handle.lock().unwrap().is_some();
+    if running {
+        start_inner(&app, &state, false)?;
+    }
+    Ok(path.display().to_string())
+}
+
+#[tauri::command]
 fn probe_now(app: tauri::AppHandle) -> serde_json::Value {
     let cfg = load_config(&app).ok();
     match cfg {
@@ -165,11 +212,19 @@ fn probe_now(app: tauri::AppHandle) -> serde_json::Value {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Core {
             handle: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
-            get_state, start, stop, get_config, save_config, probe_now
+            get_state,
+            start,
+            stop,
+            get_config,
+            save_config,
+            probe_now,
+            export_config,
+            import_config
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
@@ -200,8 +255,7 @@ pub fn run() {
                             }
                         } else {
                             let app2 = app.clone();
-                            // run the blocking config load + spawn off the menu thread
-                            std::thread::spawn(move || {
+                            tauri::async_runtime::spawn(async move {
                                 let state = app2.state::<Core>();
                                 if let Err(e) = start_inner(&app2, &state, false) {
                                     eprintln!("start: {e}");

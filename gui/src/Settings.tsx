@@ -126,12 +126,34 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
         </div>
       </section>
 
-      <div className="flex items-center gap-3 sticky bottom-0 py-3 bg-neutral-950/90 backdrop-blur border-t border-neutral-800">
+      <div className="flex items-center gap-2 sticky bottom-0 py-3 bg-neutral-950/90 backdrop-blur border-t border-neutral-800">
         <button onClick={save}
           className="px-4 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-sm">
           保存配置
         </button>
-        {status && <span className="text-xs text-neutral-400">{status}</span>}
+        <button
+          onClick={async () => {
+            const p = await api.importConfig();
+            if (p) {
+              setStatus("已导入并应用: " + p);
+              const c = await api.getConfig();
+              setCfg(c);
+              setForwards((c.forward ?? []) as ForwardRule[]);
+              onSaved();
+            }
+          }}
+          className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-sm">
+          导入配置…
+        </button>
+        <button
+          onClick={async () => {
+            const p = await api.exportConfig();
+            if (p) setStatus("已导出到: " + p);
+          }}
+          className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-sm">
+          导出配置…
+        </button>
+        {status && <span className="text-xs text-neutral-400 truncate max-w-52" title={status}>{status}</span>}
       </div>
     </div>
   );
