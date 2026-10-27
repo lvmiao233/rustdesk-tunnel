@@ -5,3 +5,4 @@
 rdt.toml
 rdt-local.toml
 rdt-relaytest.toml
+gui/dist/
