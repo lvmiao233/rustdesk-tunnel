@@ -134,7 +134,7 @@ impl App {
 
     /// Bring the whole stack up and monitor it until it dies or we're stopped.
     async fn run_stack(&self) -> Result<()> {
-        self.set(Phase::Connecting("hbbs punch".into()));
+        self.set(Phase::Connecting("打洞请求".into()));
         let punch = crate::rendezvous::punch(
             &self.cfg.rustdesk.server,
             &self.cfg.rustdesk.device_id,
@@ -154,44 +154,41 @@ impl App {
             );
         }
 
-        self.set(Phase::Connecting("relay".into()));
-        let use_direct = punch.is_local && std::env::var("RDT_RELAY").is_err();
-        let stream = if use_direct {
-            tokio::net::TcpStream::connect(punch.peer_addr)
-                .await
-                .with_context(|| format!("direct connect {}", punch.peer_addr))?
+        // Always relay. Our intranet-first hbbs reports is_local=true to every
+        // punch (so stock clients try the LAN instantly), which says nothing
+        // about where WE are; and on campus the probe keeps the tunnel idle
+        // entirely, so there is no direct case worth dialing here.
+        self.set(Phase::Connecting("中继连接".into()));
+        let relay_server = if punch.relay_server.is_empty() {
+            self.cfg.rustdesk.server.clone()
         } else {
-            let relay_server = if punch.relay_server.is_empty() {
-                self.cfg.rustdesk.server.clone()
-            } else {
-                punch.relay_server.clone()
-            };
-            crate::relay::open(
-                &self.cfg.rustdesk.server,
-                &self.cfg.rustdesk.device_id,
-                &self.cfg.rustdesk.key,
-                &relay_server,
-                Duration::from_secs(15),
-            )
-            .await
-            .context("relay")?
+            punch.relay_server.clone()
         };
+        let stream = crate::relay::open(
+            &self.cfg.rustdesk.server,
+            &self.cfg.rustdesk.device_id,
+            &self.cfg.rustdesk.key,
+            &relay_server,
+            Duration::from_secs(15),
+        )
+        .await
+        .context("relay")?;
 
-        self.set(Phase::Connecting("session login".into()));
-        let username = if use_direct {
-            "127.0.0.1".to_string()
-        } else {
-            self.cfg.rustdesk.device_id.clone()
-        };
-        let tunnel = crate::session::handshake(stream, &self.cfg, &username, Some(&punch.pk))
-            .await
-            .context("session")?;
+        self.set(Phase::Connecting("会话登录".into()));
+        let tunnel = crate::session::handshake(
+            stream,
+            &self.cfg,
+            &self.cfg.rustdesk.device_id,
+            Some(&punch.pk),
+        )
+        .await
+        .context("session")?;
 
         let Some(ssh_cfg) = self.cfg.ssh.as_ref() else {
             anyhow::bail!("no [ssh] section: refusing to serve unencrypted forwards; configure [ssh] and [[forward]]");
         };
 
-        self.set(Phase::Connecting("ssh".into()));
+        self.set(Phase::Connecting("SSH 通道".into()));
         let peer_hostname = tunnel.peer_hostname.clone();
         let encrypted_login = tunnel.encrypted_login;
         let (ssh, dead) = crate::ssh::SshTunnel::connect(tunnel, ssh_cfg, &Config::state_dir()).await?;
