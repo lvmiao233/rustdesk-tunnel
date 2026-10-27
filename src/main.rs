@@ -3,6 +3,7 @@ mod mangle;
 mod probe;
 mod proto;
 mod rendezvous;
+mod session;
 mod relay;
 
 use anyhow::Result;
@@ -25,6 +26,9 @@ fn main() {
             "--config" | "-c" => {
                 i += 1;
                 cfg_path = args.get(i).cloned().unwrap_or_default();
+            }
+            "--force" | "-f" => {
+                std::env::set_var("RDT_FORCE", "1");
             }
             other => cmd = other.to_string(),
         }
@@ -54,6 +58,7 @@ async fn run(cmd: &str, cfg: &config::Config) -> i32 {
         "probe" => probe_cmd(cfg).await,
         "punch" => punch_cmd(cfg).await,
         "relay" => relay_cmd(cfg).await,
+        "connect" => connect_cmd(cfg).await,
             "relay" => relay_cmd(cfg).await,
         other => {
             eprintln!("unknown command: {other}\n{USAGE}");
@@ -70,6 +75,43 @@ async fn probe_cmd(cfg: &config::Config) -> i32 {
     )
     .await;
     println!("campus={on_campus}");
+    0
+}
+
+async fn connect_cmd(cfg: &config::Config) -> i32 {
+    // Check campus first
+    let on_campus = probe::http_body_contains(
+        &cfg.campus.probe_url,
+        &cfg.campus.probe_expect,
+        cfg.campus.probe_timeout_ms,
+    ).await;
+    if on_campus && std::env::var("RDT_FORCE").is_err() {
+        println!("campus=true, tunnel idle (direct access available)");
+        return 0;
+    }
+    println!("campus=false, establishing tunnel...");
+
+    let punch = match rendezvous::punch(
+        &cfg.rustdesk.server,
+        &cfg.rustdesk.device_id,
+        &cfg.rustdesk.key,
+        Duration::from_secs(10),
+    ).await {
+        Ok(p) => p,
+        Err(e) => { eprintln!("punch failed: {e:#}"); return 1; }
+    };
+    eprintln!("peer: {} (is_local={}) — connecting...", punch.peer_addr, punch.is_local);
+
+    let session = match session::Session::connect_direct(
+        punch.peer_addr, &punch.pk, cfg,
+    ).await {
+        Ok(s) => s,
+        Err(e) => { eprintln!("session failed: {e:#}"); return 1; }
+    };
+    if let Err(e) = session.serve(cfg.local.listen).await {
+        eprintln!("serve: {e:#}");
+        return 1;
+    }
     0
 }
 

@@ -20,8 +20,8 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ed25519-dalek = "2"
-crypto_box = "0.9"
-crypto_secretbox = "0.1"
+sodiumoxide = "0.2"
+
 blake2 = "0.10"
 digest = "0.10"
 

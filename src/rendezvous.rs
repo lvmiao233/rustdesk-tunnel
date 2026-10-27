@@ -62,7 +62,7 @@ pub async fn punch(
     s.write_all(&TCP_PUNCH_PREFIX).await?;
     // Brief pause so the two writes land as separate TCP reads server-side;
     // coalesced into one frame, hbbs cannot parse the combination
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    tokio::time::sleep(Duration::from_millis(5)).await;
     s.write_all(&wire).await?;
 
     let mut buf: Vec<u8> = Vec::with_capacity(2048);
