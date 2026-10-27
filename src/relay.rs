@@ -53,6 +53,7 @@ pub async fn open(
             uuid: uuid.clone(),
             relay_server: relay_server.to_owned(),
             licence_key: licence_key.to_owned(),
+            secure: true, // peer only runs the SignedId handshake when set
             ..Default::default()
         })),
     };

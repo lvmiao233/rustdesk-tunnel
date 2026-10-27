@@ -1,4 +1,5 @@
 mod config;
+mod crypto;
 mod frame;
 mod mangle;
 mod probe;
@@ -137,7 +138,7 @@ async fn direct_cmd(cfg: &config::Config, addr: &str) -> i32 {
         let cfg = cfg.clone();
         async move {
             let s = tokio::net::TcpStream::connect(addr).await?;
-            session::handshake(s, &cfg, &addr.to_string()).await
+            session::handshake(s, &cfg, &addr.to_string(), None).await
         }
     };
     match session::serve(listener, &label, dial).await {
@@ -186,7 +187,7 @@ async fn relay_cmd(cfg: &config::Config) -> i32 {
         }
     };
     eprintln!("relay pipe established, starting session handshake...");
-    match session::handshake(stream, cfg, &cfg.rustdesk.device_id).await {
+    match session::handshake(stream, cfg, &cfg.rustdesk.device_id, Some(&punch.pk)).await {
         Ok(t) => {
             eprintln!(
                 "logged in via relay: {} -> {}:{}",
@@ -240,7 +241,7 @@ async fn connect_cmd(cfg: &config::Config) -> i32 {
             if punch.is_local && std::env::var("RDT_RELAY").is_err() {
                 match tokio::net::TcpStream::connect(punch.peer_addr).await {
                     Ok(s) => {
-                        return session::handshake(s, &cfg, &punch.peer_addr.to_string()).await
+                        return session::handshake(s, &cfg, &punch.peer_addr.to_string(), None).await
                     }
                     Err(e) => eprintln!("direct {e}, falling back to relay"),
                 }
@@ -253,7 +254,7 @@ async fn connect_cmd(cfg: &config::Config) -> i32 {
             let stream =
                 relay::open(&server, &device_id, &key, &relay_server, Duration::from_secs(15))
                     .await?;
-            session::handshake(stream, &cfg, &cfg.rustdesk.device_id).await
+            session::handshake(stream, &cfg, &cfg.rustdesk.device_id, Some(&punch.pk)).await
         }
     };
 
