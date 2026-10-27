@@ -3,7 +3,6 @@ name = "rustdesk-tunnel"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
-description = "Campus-aware RustDesk protocol tunnel client (P0 core)"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
@@ -11,19 +10,10 @@ prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 anyhow = "1"
-bytes = "1"
 sha2 = "0.10"
-rand = "0.8"
-base64 = "0.22"
 hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
-
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-ed25519-dalek = "2"
 sodiumoxide = "0.2"
-
-blake2 = "0.10"
-digest = "0.10"
 
 [[bin]]
 name = "rdt"

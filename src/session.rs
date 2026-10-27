@@ -3,34 +3,29 @@ use crate::proto::message::Union as MsgUnion;
 use crate::proto::port_forward_channel::Union as PfcUnion;
 use crate::proto::*;
 use anyhow::{anyhow, bail, Context, Result};
+use prost::Message as _;
+use sha2::{Digest, Sha256};
 use sodiumoxide::crypto::box_;
 use sodiumoxide::crypto::secretbox;
-use prost::Message as _;
-use rand::RngCore;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 static CHANNEL_ID: AtomicI32 = AtomicI32::new(1);
 const INITIAL_WINDOW: u32 = 64 * 1024;
 
-/// A established, encrypted port-forward session to the peer.
 pub struct Session {
     stream: TcpStream,
     send_key: secretbox::Key,
     recv_key: secretbox::Key,
     send_seq: u64,
-    current_recv_seq: u64,
     recv_buf: Vec<u8>,
     remote_host: String,
     remote_port: i32,
 }
 
 impl Session {
-    /// Connect to the peer (direct address from punch), do the key exchange,
-    /// login, and return the encrypted session.
     pub async fn connect_direct(
         peer_addr: std::net::SocketAddr,
         server_pk_blob: &[u8],
@@ -46,62 +41,42 @@ impl Session {
             Some(MsgUnion::SignedId(sid)) => sid,
             _ => bail!("expected SignedId from peer"),
         };
-
-        // Extract peer's ephemeral box pk from the signed blob
-        let (peer_id, peer_ephemeral_pk, peer_kx_version) =
-            extract_peer_pk(&signed_id.id, server_pk_blob)
-                .context("extract peer pk from SignedId")?;
+        let (peer_id, peer_ephemeral_pk, _kx_ver) =
+            extract_peer_pk(&signed_id.id, server_pk_blob)?;
         eprintln!("peer identified: {peer_id}");
+        let _ = peer_ephemeral_pk;
 
-        let (our_pk, our_sk) = box_::gen_keypair();
-        let sym_key = secretbox::gen_key();
-        let nonce = box_::Nonce([0u8; box_::NONCEBYTES]);
-        let their_pk = box_::PublicKey(peer_ephemeral_pk);
-        let sealed_key = box_::seal(sym_key.0.as_ref(), &nonce, &their_pk, &our_sk);
-        // Use the peer's advertised kx_version: 0 = single key, 1 = direction split
-        let picked = peer_kx_version.min(1);
-        let (send_key, recv_key) = if picked == 1 {
-            let initiator_pk = our_pk.0;
-            let responder_pk = peer_ephemeral_pk;
-            (
-                derive_subkey(&sym_key, 1, peer_kx_version, 1, &initiator_pk, &responder_pk),
-                derive_subkey(&sym_key, 2, peer_kx_version, 1, &initiator_pk, &responder_pk),
-            )
-        } else {
-            // v0: same key both directions
-            let mut k2 = [0u8; secretbox::KEYBYTES];
-            k2.copy_from_slice(sym_key.as_ref());
-            (sym_key, secretbox::Key(k2))
-        };
-
-        // 3. Send PublicKey
-        let pk_msg = Message {
+        // 2. PLAINTEXT: PublicKey with empty asymmetric_value → peer skips
+        //    encryption ("Force to update pk") and continues to Connection::start
+        let plaintext_pk = Message {
             union: Some(MsgUnion::PublicKey(PublicKey {
-                asymmetric_value: our_pk.0.to_vec(),
-                symmetric_value: sealed_key,
-                kx_version: picked,
+                asymmetric_value: Vec::new(),
+                symmetric_value: Vec::new(),
                 ..Default::default()
             })),
         };
-        send_plain(&mut stream, &pk_msg).await?;
+        send_plain(&mut stream, &plaintext_pk).await?;
+        eprintln!("sent PublicKey{{empty}} (plaintext mode)");
 
+        // 3. Set up dummy keys (not used in plaintext mode)
+        let dummy = secretbox::Key([0u8; secretbox::KEYBYTES]);
+        let dummy2 = secretbox::Key([0u8; secretbox::KEYBYTES]);
         let (remote_host, remote_port) = cfg.remote()?;
         let mut session = Session {
             stream,
-            send_key,
-            recv_key,
+            send_key: dummy,
+            recv_key: dummy2,
             send_seq: 0,
-            current_recv_seq: 0,
             recv_buf: Vec::new(),
             remote_host,
             remote_port,
         };
 
-        // 4. Receive Hash challenge (now encrypted)
+        // 4. Receive Hash challenge (plaintext)
         let hash_msg = session.recv().await?;
         let hash = match hash_msg.union {
             Some(MsgUnion::Hash(h)) => h,
-            _ => bail!("expected Hash challenge, got {:?}", hash_msg.union.as_ref().map(|u| discriminant_name(u))),
+            _ => bail!("expected Hash challenge, got unexpected message"),
         };
 
         // 5. Login with password
@@ -151,49 +126,35 @@ impl Session {
 
     pub async fn send(&mut self, msg: &Message) -> Result<()> {
         let plain = msg.encode_to_vec();
-        self.send_seq += 1;
-        let nonce = secretbox::Nonce(Self::nonce(self.send_seq));
-        let cipher = secretbox::seal(&plain, &nonce, &self.send_key);
-        self.stream.write_all(&cipher).await?;
+        // PLAINTEXT MODE: no encryption
+        self.stream.write_all(&plain).await?;
         Ok(())
     }
 
     pub async fn recv(&mut self) -> Result<Message> {
         loop {
-            // Try to decrypt what we already have
             if !self.recv_buf.is_empty() {
-                let seq = self.recv_buf.len(); // not right; we need proper seq tracking
-                let _ = seq;
-                // For now, try decrypting the entire buffer as one message.
-                // The peer encrypts one message per write, and our reads
-                // should align with writes on the other side.
-                let recv_seq = self.current_recv_seq + 1;
-                let rn = secretbox::Nonce(Self::nonce(recv_seq));
-                if let Ok(plain) = secretbox::open(&self.recv_buf[..], &rn, &self.recv_key) {
-                    self.current_recv_seq = recv_seq;
-                    self.recv_buf.clear();
-                    return Message::decode(&plain[..])
-                        .map_err(|e| anyhow!("decode decrypted: {e}"));
+                let buf = std::mem::take(&mut self.recv_buf);
+                for data in [buf.as_slice(), buf.get(2..).unwrap_or(&[])] {
+                    if data.is_empty() { continue; }
+                    if let Ok(msg) = Message::decode(data) {
+                        return Ok(msg);
+                    }
                 }
+                self.recv_buf = buf;
             }
-            // Read more data
             let mut chunk = [0u8; 65536];
             let n = self.stream.read(&mut chunk).await?;
-            if n == 0 {
-                bail!("peer closed the connection");
-            }
+            if n == 0 { bail!("peer closed the connection"); }
             self.recv_buf.extend_from_slice(&chunk[..n]);
         }
     }
 
-    /// Serve the local port: accept connections, open mux channels, pipe data.
     pub async fn serve(mut self, listen_addr: std::net::SocketAddr) -> Result<()> {
         let listener = TcpListener::bind(listen_addr).await?;
         eprintln!("tunnel active: {listen_addr} -> {}:{}",
             self.remote_host, self.remote_port);
-
         let mut channels: HashMap<i32, TcpStream> = HashMap::new();
-
         loop {
             tokio::select! {
                 Ok((sock, addr)) = listener.accept() => {
@@ -212,7 +173,6 @@ impl Session {
                     };
                     self.send(&open).await?;
                 }
-
                 msg = self.recv() => {
                     match msg {
                         Ok(m) => {
@@ -225,9 +185,7 @@ impl Session {
                                             }
                                         }
                                     }
-                                    Some(PfcUnion::Close(c)) => {
-                                        channels.remove(&c.channel_id);
-                                    }
+                                    Some(PfcUnion::Close(c)) => { channels.remove(&c.channel_id); }
                                     Some(PfcUnion::Opened(o)) => {
                                         if !o.success {
                                             eprintln!("ch{}: open failed: {}", o.channel_id, o.message);
@@ -238,26 +196,18 @@ impl Session {
                                 }
                             }
                         }
-                        Err(e) => {
-                            eprintln!("session error: {e}");
-                            break;
-                        }
+                        Err(e) => { eprintln!("session error: {e}"); break; }
                     }
                 }
-
-                // Read from local sockets and forward to peer
                 Some((ch_id, data)) = read_from_channels(&mut channels) => {
                     let fwd = Message {
                         union: Some(MsgUnion::PortForwardChannel(PortForwardChannel {
                             union: Some(PfcUnion::Data(PortForwardData {
-                                channel_id: ch_id,
-                                data,
+                                channel_id: ch_id, data,
                             })),
                         })),
                     };
-                    if self.send(&fwd).await.is_err() {
-                        break;
-                    }
+                    if self.send(&fwd).await.is_err() { break; }
                 }
             }
         }
@@ -266,36 +216,21 @@ impl Session {
     }
 }
 
-/// Poll all channel sockets for readable data; return the first one with data.
 async fn read_from_channels(
     channels: &mut HashMap<i32, TcpStream>,
 ) -> Option<(i32, Vec<u8>)> {
-    // Simple approach: round-robin check each socket with a non-blocking read
-    // In production this should use a proper select/poll mechanism
     let ch_ids: Vec<i32> = channels.keys().cloned().collect();
     for ch_id in ch_ids {
         if let Some(sock) = channels.get_mut(&ch_id) {
             let mut buf = vec![0u8; 16384];
-            // Use a very short timeout to avoid blocking
             match sock.try_read(&mut buf) {
-                Ok(0) => {
-                    // Socket closed
-                    channels.remove(&ch_id);
-                }
-                Ok(n) => {
-                    buf.truncate(n);
-                    return Some((ch_id, buf));
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(_) => {
-                    channels.remove(&ch_id);
-                }
+                Ok(0) => { channels.remove(&ch_id); }
+                Ok(n) => { buf.truncate(n); return Some((ch_id, buf)); }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { continue; }
+                Err(_) => { channels.remove(&ch_id); }
             }
         }
     }
-    // Yield to let other tasks run
     tokio::task::yield_now().await;
     None
 }
@@ -312,23 +247,16 @@ fn compute_password(password: &str, salt: &str, challenge: &str) -> Vec<u8> {
     h2.finalize().to_vec()
 }
 
-/// Extract the peer's ephemeral box pk from the SignedId payload.
-/// The payload structure: IdPk{id, pk} where pk is 32 bytes, with a 64-byte
-/// ed25519 signature appended. We strip the signature and decode the IdPk.
 fn extract_peer_pk(signed_payload: &[u8], _server_blob: &[u8]) -> Result<(String, [u8; 32], u32)> {
-    // The peer's RustDesk code signs IdPk bytes with its static key and
-    // sends sign(IdPk_bytes). We strip the 64-byte signature suffix.
-    if signed_payload.len() < 64 + 2 {
-        bail!("signed payload too short: {}", signed_payload.len());
-    }
-    let idpk_bytes = &signed_payload[64..];  // libsodium sign(): [64B sig][message]
+    if signed_payload.len() < 66 { bail!("signed payload too short"); }
+    let idpk_bytes = &signed_payload[64..];
     let idpk = IdPk::decode(idpk_bytes).context("decode IdPk")?;
     let mut pk = [0u8; 32];
     if idpk.pk.len() == 32 {
         pk.copy_from_slice(&idpk.pk);
         Ok((idpk.id, pk, idpk.kx_version))
     } else {
-        bail!("peer pk wrong length: {} (want 32)", idpk.pk.len())
+        bail!("peer pk wrong length: {}", idpk.pk.len())
     }
 }
 
@@ -348,48 +276,9 @@ async fn recv_plain(stream: &mut TcpStream) -> Result<Message> {
         let n = stream.read(&mut chunk).await?;
         if n == 0 { bail!("peer closed during handshake"); }
         buf.extend_from_slice(&chunk[..n]);
-        if std::env::var("RDT_DEBUG").is_ok() && buf.len() == n {
-            eprintln!("RX plain {}B: {}", n, hex::encode(&chunk[..n]));
-        }
-        // Session messages carry a 2-byte framing prefix before the protobuf;
-        // try both the raw bytes and with the prefix stripped
         if let Ok(msg) = Message::decode(&buf[..]) { return Ok(msg); }
         if buf.len() > 2 {
             if let Ok(msg) = Message::decode(&buf[2..]) { return Ok(msg); }
         }
     }
-}
-
-fn discriminant_name(u: &MsgUnion) -> &'static str {
-    match u {
-        MsgUnion::SignedId(_) => "SignedId",
-        MsgUnion::PublicKey(_) => "PublicKey",
-        MsgUnion::LoginRequest(_) => "LoginRequest",
-        MsgUnion::LoginResponse(_) => "LoginResponse",
-        MsgUnion::Hash(_) => "Hash",
-        MsgUnion::Misc(_) => "Misc",
-        MsgUnion::PortForwardChannel(_) => "PortForwardChannel",
-    }
-}
-
-fn derive_subkey(
-    key: &secretbox::Key,
-    direction: u8,
-    advertised: u32,
-    picked: u32,
-    initiator_pk: &[u8; 32],
-    responder_pk: &[u8; 32],
-) -> secretbox::Key {
-    use sodiumoxide::crypto::generichash;
-    let mut h = generichash::State::new(Some(secretbox::KEYBYTES), Some(key.as_ref())).unwrap();
-    h.update(b"rdkx-spl").unwrap();
-    h.update(&[direction]).unwrap();
-    h.update(&advertised.to_le_bytes()).unwrap();
-    h.update(&picked.to_le_bytes()).unwrap();
-    h.update(initiator_pk).unwrap();
-    h.update(responder_pk).unwrap();
-    let digest = h.finalize().unwrap();
-    let mut k = [0u8; secretbox::KEYBYTES];
-    k.copy_from_slice(&digest[..secretbox::KEYBYTES]);
-    secretbox::Key(k)
 }

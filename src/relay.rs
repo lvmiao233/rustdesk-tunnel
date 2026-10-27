@@ -3,7 +3,7 @@ use crate::proto::rendezvous_message::Union as RzUnion;
 use crate::proto::*;
 use anyhow::{bail, Result};
 use prost::Message as _;
-use rand::Rng;
+
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
