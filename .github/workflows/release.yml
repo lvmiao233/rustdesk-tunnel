@@ -9,7 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  # sole owner of release creation — parallel builders never race on it
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: create draft release (reuse if exists)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+            gh release create "${{ github.ref_name }}" \
+              --draft --title "${{ github.ref_name }}" \
+              --notes "rustdesk-tunnel ${{ github.ref_name }}"
+          fi
+
   cli:
+    needs: [create-release]
+    if: always() && !failure() && !cancelled()
     name: cli ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -82,7 +100,7 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/rdt.exe dist/rdt-${{ matrix.name }}.exe
-          cd dist && 7z a rdt-${{ matrix.name }}.zip rdt-${{ matrix.name }}.exe
+          cd dist && 7z a rdt-${{ matrix.name }}.zip rdt-${{ matrix.name }}.exe && rm rdt-${{ matrix.name }}.exe
         shell: bash
 
       - uses: actions/upload-artifact@v4
@@ -94,11 +112,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" || true
-          gh release upload "${{ github.ref_name }}" dist/rdt-${{ matrix.name }}.* --clobber
+        run: gh release upload "${{ github.ref_name }}" dist/rdt-${{ matrix.name }}.* --clobber
+        shell: bash
 
   gui:
+    needs: [create-release]
+    if: always() && !failure() && !cancelled()
     name: gui ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -139,22 +158,48 @@ jobs:
       - name: install frontend deps
         run: pnpm install --frozen-lockfile
         working-directory: gui
+
+      # tauri-action builds only — release handling is ours, no races
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: gui
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: 'RustDesk Tunnel ${{ github.ref_name }}'
-          releaseDraft: true
-          prerelease: false
           args: ${{ matrix.args }}
-      - name: collect bundles
-        if: github.ref_type != 'tag'
+
+      - name: collect bundles (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: gui-${{ matrix.name }}
           path: |
-            target/release/bundle/**
-            target/*/release/bundle/**
+            target/release/bundle/**/*
+            target/*/release/bundle/**/*
           if-no-files-found: error
+
+      - name: upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -t files < <(find target -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.msi' \
+               -o -name '*-setup.exe' -o -name '*.dmg' \) \
+            ! -name '*.sig')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no bundles found" >&2; exit 1
+          fi
+          printf 'uploading: %s\n' "${files[@]}"
+          gh release upload "${{ github.ref_name }}" "${files[@]}" --clobber
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [cli, gui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" --draft=false --latest
+          echo "published:"; gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name'
