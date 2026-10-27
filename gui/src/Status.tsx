@@ -18,15 +18,13 @@ export default function Status({ state, onChanged }: { state: StateSnapshot | nu
 
   return (
     <div className="space-y-4">
-      <section className={`rounded-xl border p-4 ${meta.ring}`}>
+      <section className={`rounded-xl border p-4 ${meta.ring} ${kind === "active" ? "glow-sweep" : ""}`}>
         <div className="flex items-center gap-3">
           <span className={`w-3 h-3 rounded-full ${meta.dot}`} />
           <div className="flex-1">
             <div className={`font-medium ${meta.text}`}>{state?.label ?? "已停止"}</div>
             {state?.kind === "active" && (
-              <div className="text-xs text-neutral-400 mt-0.5">
-                {state.peer} · 登录加密 {state.encrypted_login ? "已启用" : "未启用"}
-              </div>
+              <div className="text-xs text-neutral-400 mt-0.5">{state.peer}</div>
             )}
             {state?.kind === "failed" && state.error && (
               <div className="text-xs text-red-400/80 mt-1 break-all">{state.error}</div>
@@ -90,10 +88,6 @@ export default function Status({ state, onChanged }: { state: StateSnapshot | nu
             {running ? "暂无转发规则，请在设置中添加" : "隧道未运行"}
           </div>
         )}
-        <p className="mt-3 text-[11px] leading-relaxed text-neutral-500">
-          隧道内是 SSH 加密通道：RustDesk 中继只见到 SSH 密文，数据端到端加密。
-          校内环境下应用自动闲置，不会建立隧道。
-        </p>
       </section>
     </div>
   );

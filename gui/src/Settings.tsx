@@ -50,48 +50,45 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="space-y-5">
       <section>
-        <h2 className="text-sm font-medium text-neutral-300 mb-3">RustDesk 服务器与设备</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className={label}>hbbs 地址</label>
+        <h2 className="text-sm font-medium text-neutral-300 mb-3">公网中继节点</h2>
+        <div className="space-y-3">
+          <div>
+            <label className={label}>中继节点地址</label>
             <input className={field} value={cfg.rustdesk?.server ?? ""}
               onChange={(e) => set(["rustdesk", "server"], e.target.value)} />
           </div>
-          <div className="col-span-2">
-            <label className={label}>服务器公钥 (id_ed25519.pub, base64)</label>
+          <div>
+            <label className={label}>中继服务公钥</label>
             <input className={field} value={cfg.rustdesk?.key ?? ""}
               onChange={(e) => set(["rustdesk", "key"], e.target.value)} />
-          </div>
-          <div>
-            <label className={label}>设备 ID</label>
-            <input className={field} value={cfg.rustdesk?.device_id ?? ""}
-              onChange={(e) => set(["rustdesk", "device_id"], e.target.value)} />
-          </div>
-          <div>
-            <label className={label}>RustDesk 密码</label>
-            <input className={field} type="password" value={cfg.rustdesk?.password ?? ""}
-              onChange={(e) => set(["rustdesk", "password"], e.target.value)} />
           </div>
         </div>
       </section>
 
       <section>
-        <h2 className="text-sm font-medium text-neutral-300 mb-3">设备 SSH（隧道内加密层）</h2>
+        <h2 className="text-sm font-medium text-neutral-300 mb-3">校内中继节点</h2>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>SSH 用户</label>
+            <label className={label}>中继设备 ID</label>
+            <input className={field} value={cfg.rustdesk?.device_id ?? ""}
+              onChange={(e) => set(["rustdesk", "device_id"], e.target.value)} />
+          </div>
+          <div>
+            <label className={label}>中继设备密码</label>
+            <input className={field} type="password" value={cfg.rustdesk?.password ?? ""}
+              onChange={(e) => set(["rustdesk", "password"], e.target.value)} />
+          </div>
+          <div>
+            <label className={label}>中继设备用户</label>
             <input className={field} value={cfg.ssh?.user ?? ""}
               onChange={(e) => set(["ssh", "user"], e.target.value)} />
           </div>
           <div>
-            <label className={label}>SSH 密码（或留空并用密钥文件）</label>
+            <label className={label}>中继设备 SSH 密码</label>
             <input className={field} type="password" value={cfg.ssh?.password ?? ""}
               onChange={(e) => set(["ssh", "password"], e.target.value)} />
           </div>
         </div>
-        <p className="mt-2 text-[11px] text-neutral-500">
-          隧道固定转发设备的 22 端口；以下端口经由设备上的 SSH 通道转发，端到端加密。
-        </p>
       </section>
 
       <section>
@@ -107,12 +104,12 @@ export default function Settings({ onSaved }: { onSaved: () => void }) {
         <div className="space-y-2">
           {forwards.map((f, i) => (
             <div key={i} className="flex gap-2 items-center">
-              <input className={field} value={f.local} placeholder="本地监听"
+              <input className={`${field} flex-1 min-w-0`} value={f.local} placeholder="本地监听"
                 onChange={(e) => setForwards(forwards.map((x, j) => j === i ? { ...x, local: e.target.value } : x))} />
               <span className="text-neutral-600 text-sm">→</span>
-              <input className={field} value={f.remote_host} placeholder="设备侧主机"
+              <input className={`${field} flex-1 min-w-0`} value={f.remote_host} placeholder="校内主机"
                 onChange={(e) => setForwards(forwards.map((x, j) => j === i ? { ...x, remote_host: e.target.value } : x))} />
-              <input className={`${field} w-24`} value={f.remote_port} placeholder="端口"
+              <input className={`${field} w-20 shrink-0`} value={f.remote_port} placeholder="端口"
                 onChange={(e) => setForwards(forwards.map((x, j) => j === i ? { ...x, remote_port: Number(e.target.value) || 0 } : x))} />
               <button className="text-red-400/70 hover:text-red-400 px-2"
                 onClick={() => setForwards(forwards.filter((_, j) => j !== i))}>✕</button>

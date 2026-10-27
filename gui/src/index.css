@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+@keyframes glow-sweep {
+  0% { transform: translateX(-120%); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: translateX(320%); opacity: 0; }
+}
+.glow-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.glow-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(52, 211, 153, 0.22) 45%, rgba(52, 211, 153, 0.4) 50%, rgba(52, 211, 153, 0.22) 55%, transparent);
+  animation: glow-sweep 2.6s ease-in-out infinite;
+  pointer-events: none;
+}

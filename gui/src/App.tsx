@@ -20,18 +20,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans select-none">
-      <div className="max-w-2xl mx-auto p-5">
-        <header className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center font-bold text-neutral-900">
-            R
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">RustDesk Tunnel</h1>
-            <p className="text-xs text-neutral-400">校园感知 · 中继隧道 · SSH 端到端加密</p>
-          </div>
-        </header>
-
-        <nav className="flex gap-1 mb-4 p-1 bg-neutral-900 rounded-lg border border-neutral-800">
+      <div className="max-w-[500px] mx-auto p-4 pt-5">
+        <nav className="flex gap-1 mb-4 p-1 bg-neutral-900 rounded-lg border border-neutral-800 mt-1">
           {(["status", "settings"] as Tab[]).map((t) => (
             <button
               key={t}
